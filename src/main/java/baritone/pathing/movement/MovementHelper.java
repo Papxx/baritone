@@ -42,6 +42,7 @@ import net.minecraft.world.level.block.piston.MovingPistonBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraft.world.level.block.state.properties.Half;
+import net.minecraft.world.level.block.state.properties.PotentSulfurState;
 import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.level.block.state.properties.StairsShape;
 import net.minecraft.world.level.material.*;
@@ -54,6 +55,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.IntFunction;
 
 import static baritone.api.utils.RotationUtils.DEG_TO_RAD_F;
 import static baritone.pathing.movement.Movement.HORIZONTALS_BUT_ALSO_DOWN_____SO_EVERY_DIRECTION_EXCEPT_UP;
@@ -143,7 +145,7 @@ public interface MovementHelper extends ActionCosts, Helper {
         if (block instanceof AirBlock) {
             return YES;
         }
-        if (block instanceof BaseFireBlock || block == Blocks.COBWEB || block == Blocks.END_PORTAL || block == Blocks.COCOA || block instanceof AbstractSkullBlock || block == Blocks.BUBBLE_COLUMN || block instanceof ShulkerBoxBlock || block instanceof SlabBlock || block instanceof TrapDoorBlock || block == Blocks.HONEY_BLOCK || block == Blocks.END_ROD || block == Blocks.SWEET_BERRY_BUSH || block == Blocks.POINTED_DRIPSTONE || block instanceof AmethystClusterBlock || block instanceof AzaleaBlock) {
+        if (block instanceof BaseFireBlock || block == Blocks.COBWEB || block == Blocks.END_PORTAL || block == Blocks.COCOA || block instanceof AbstractSkullBlock || block == Blocks.BUBBLE_COLUMN || block instanceof ShulkerBoxBlock || block instanceof SlabBlock || block instanceof TrapDoorBlock || block == Blocks.HONEY_BLOCK || block == Blocks.END_ROD || block == Blocks.SWEET_BERRY_BUSH || block instanceof SpeleothemBlock || block instanceof AmethystClusterBlock || block instanceof AzaleaBlock) {
             return NO;
         }
         if (block == Blocks.BIG_DRIPLEAF) {
@@ -213,6 +215,9 @@ public interface MovementHelper extends ActionCosts, Helper {
         FluidState fluidState = state.getFluidState();
         if (!fluidState.isEmpty()) {
             if (isFlowing(x, y, z, state, bsi)) {
+                return false;
+            }
+            if (inGeyserColumn(bsi, x, y, z)) {
                 return false;
             }
             // Everything after this point has to be a special case as it relies on the water not being flowing, which means a special case is needed.
@@ -447,7 +452,6 @@ public interface MovementHelper extends ActionCosts, Helper {
     }
 
     static boolean canWalkOnPosition(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
-        Block block = state.getBlock();
         if (isWater(state)) {
             // since this is called literally millions of times per second, the benefit of not allocating millions of useless "pos.up()"
             // BlockPos s that we'd just garbage collect immediately is actually noticeable. I don't even think its a decrease in readability
@@ -605,7 +609,6 @@ public interface MovementHelper extends ActionCosts, Helper {
     }
 
     static double getMiningDurationTicks(CalculationContext context, int x, int y, int z, BlockState state, boolean includeFalling) {
-        Block block = state.getBlock();
         if (!canWalkThrough(context, x, y, z, state)) {
             if (!state.getFluidState().isEmpty()) {
                 return COST_INF;
@@ -722,6 +725,47 @@ public interface MovementHelper extends ActionCosts, Helper {
     }
 
     /**
+     * 26.2 geysers: potent sulfur with water above and magma (erupts periodically) or lava (erupts continuously)
+     * below. An eruption launches everything in the column above it, then there is fall damage. The block computes
+     * this state itself ({@code PotentSulfurBlock.STATE}), so no need to look at the blocks around it.
+     */
+    static boolean isGeyser(BlockState state) {
+        if (!(state.getBlock() instanceof PotentSulfurBlock)) {
+            return false;
+        }
+        PotentSulfurState geyser = state.getValue(PotentSulfurBlock.STATE);
+        return geyser == PotentSulfurState.DORMANT || geyser == PotentSulfurState.ERUPTING || geyser == PotentSulfurState.CONTINUOUS;
+    }
+
+    /**
+     * @return whether x, y, z is in the water column above a {@link #isGeyser geyser}
+     */
+    static boolean inGeyserColumn(BlockStateInterface bsi, int x, int y, int z) {
+        return inGeyserColumn(dy -> bsi.get0(x, y - dy, z));
+    }
+
+    /**
+     * @param below the state {@code dy} blocks below the position, {@code null} below the world
+     * @return whether the position is in the water column above a {@link #isGeyser geyser}
+     */
+    static boolean inGeyserColumn(IntFunction<BlockState> below) {
+        // a geyser has at most ALLOWED_WATER_BLOCKS_ABOVE water blocks on top
+        for (int dy = 1; dy <= PotentSulfurBlock.ALLOWED_WATER_BLOCKS_ABOVE; dy++) {
+            BlockState state = below.apply(dy);
+            if (state == null) {
+                return false;
+            }
+            if (isGeyser(state)) {
+                return true;
+            }
+            if (!isWater(state)) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Returns whether or not the block at the specified pos is
      * water, regardless of whether or not it is flowing.
      *
@@ -779,7 +823,7 @@ public interface MovementHelper extends ActionCosts, Helper {
                 || block instanceof MovingPistonBlock
                 || block instanceof ScaffoldingBlock
                 || block instanceof ShulkerBoxBlock
-                || block instanceof PointedDripstoneBlock
+                || block instanceof SpeleothemBlock // pointed dripstone and the 26.2 sulfur spike
                 || block instanceof AmethystClusterBlock) {
             return false;
         }

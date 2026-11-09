@@ -503,55 +503,65 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         }
         inProgress = pathfinder;
         Baritone.getExecutor().execute(() -> {
-            if (talkAboutIt) {
-                logDebug("Starting to search for path from " + start + " to " + goal);
-            }
+            try {
+                if (talkAboutIt) {
+                    logDebug("Starting to search for path from " + start + " to " + goal);
+                }
 
-            PathCalculationResult calcResult = pathfinder.calculate(primaryTimeout, failureTimeout);
-            synchronized (pathPlanLock) {
-                Optional<PathExecutor> executor = calcResult.getPath().map(p -> new PathExecutor(PathingBehavior.this, p));
-                if (current == null) {
-                    if (executor.isPresent()) {
-                        if (executor.get().getPath().positions().contains(expectedSegmentStart)) {
-                            queuePathEvent(PathEvent.CALC_FINISHED_NOW_EXECUTING);
-                            current = executor.get();
-                            resetEstimatedTicksToGoal(start);
-                        } else {
-                            logDebug("Warning: discarding orphan path segment with incorrect start");
-                        }
-                    } else {
-                        if (calcResult.getType() != PathCalculationResult.Type.CANCELLATION && calcResult.getType() != PathCalculationResult.Type.EXCEPTION) {
-                            // don't dispatch CALC_FAILED on cancellation
-                            queuePathEvent(PathEvent.CALC_FAILED);
-                        }
-                    }
-                } else {
-                    if (next == null) {
+                PathCalculationResult calcResult = pathfinder.calculate(primaryTimeout, failureTimeout);
+                synchronized (pathPlanLock) {
+                    Optional<PathExecutor> executor = calcResult.getPath().map(p -> new PathExecutor(PathingBehavior.this, p));
+                    if (current == null) {
                         if (executor.isPresent()) {
-                            if (executor.get().getPath().getSrc().equals(current.getPath().getDest())) {
-                                queuePathEvent(PathEvent.NEXT_SEGMENT_CALC_FINISHED);
-                                next = executor.get();
+                            if (executor.get().getPath().positions().contains(expectedSegmentStart)) {
+                                queuePathEvent(PathEvent.CALC_FINISHED_NOW_EXECUTING);
+                                current = executor.get();
+                                resetEstimatedTicksToGoal(start);
                             } else {
-                                logDebug("Warning: discarding orphan next segment with incorrect start");
+                                logDebug("Warning: discarding orphan path segment with incorrect start");
                             }
                         } else {
-                            queuePathEvent(PathEvent.NEXT_CALC_FAILED);
+                            if (calcResult.getType() != PathCalculationResult.Type.CANCELLATION && calcResult.getType() != PathCalculationResult.Type.EXCEPTION) {
+                                // don't dispatch CALC_FAILED on cancellation
+                                queuePathEvent(PathEvent.CALC_FAILED);
+                            }
                         }
                     } else {
-                        //throw new IllegalStateException("I have no idea what to do with this path");
-                        // no point in throwing an exception here, and it gets it stuck with inProgress being not null
-                        logDirect("Warning: PathingBehaivor illegal state! Discarding invalid path!");
+                        if (next == null) {
+                            if (executor.isPresent()) {
+                                if (executor.get().getPath().getSrc().equals(current.getPath().getDest())) {
+                                    queuePathEvent(PathEvent.NEXT_SEGMENT_CALC_FINISHED);
+                                    next = executor.get();
+                                } else {
+                                    logDebug("Warning: discarding orphan next segment with incorrect start");
+                                }
+                            } else {
+                                queuePathEvent(PathEvent.NEXT_CALC_FAILED);
+                            }
+                        } else {
+                            //throw new IllegalStateException("I have no idea what to do with this path");
+                            // no point in throwing an exception here, and it gets it stuck with inProgress being not null
+                            logDirect("Warning: PathingBehaivor illegal state! Discarding invalid path!");
+                        }
+                    }
+                    if (talkAboutIt && current != null && current.getPath() != null) {
+                        if (goal.isInGoal(current.getPath().getDest())) {
+                            logDebug("Finished finding a path from " + start + " to " + goal + ". " + current.getPath().getNumNodesConsidered() + " nodes considered");
+                        } else {
+                            logDebug("Found path segment from " + start + " towards " + goal + ". " + current.getPath().getNumNodesConsidered() + " nodes considered");
+                        }
+                    }
+                    synchronized (pathCalcLock) {
+                        inProgress = null;
                     }
                 }
-                if (talkAboutIt && current != null && current.getPath() != null) {
-                    if (goal.isInGoal(current.getPath().getDest())) {
-                        logDebug("Finished finding a path from " + start + " to " + goal + ". " + current.getPath().getNumNodesConsidered() + " nodes considered");
-                    } else {
-                        logDebug("Found path segment from " + start + " towards " + goal + ". " + current.getPath().getNumNodesConsidered() + " nodes considered");
-                    }
-                }
+            } finally {
+                // if anything above throws (e.g. an Error escaping calculate), inProgress has to be cleared anyway,
+                // otherwise no path would ever be calculated again until the game is restarted
                 synchronized (pathCalcLock) {
-                    inProgress = null;
+                    if (inProgress == pathfinder) {
+                        inProgress = null;
+                    }
                 }
             }
         });

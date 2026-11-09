@@ -47,3 +47,7 @@ dependencies {
     implementation group: 'xyz.wagyourtail.unimined', name: 'xyz.wagyourtail.unimined.gradle.plugin', version: '1.4.2-SNAPSHOT'
     implementation group: 'xyz.wagyourtail.unimined.mapping', name: 'unimined-mapping-library-jvm', version: '1.2.2'
 }
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = "UTF-8"
+}

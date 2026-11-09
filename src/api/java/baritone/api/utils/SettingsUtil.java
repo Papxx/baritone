@@ -33,8 +33,10 @@ import java.awt.*;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -102,10 +104,14 @@ public class SettingsUtil {
     }
 
     public static synchronized void save(Settings settings) {
-        try (BufferedWriter out = Files.newBufferedWriter(settingsByName(SETTINGS_DEFAULT_NAME))) {
-            for (Settings.Setting setting : modifiedSettings(settings)) {
-                out.write(settingToString(setting) + "\n");
-            }
+        try {
+            AtomicFileWriter.write(settingsByName(SETTINGS_DEFAULT_NAME), stream -> {
+                try (BufferedWriter out = new BufferedWriter(new OutputStreamWriter(stream, StandardCharsets.UTF_8))) {
+                    for (Settings.Setting<?> setting : modifiedSettings(settings)) {
+                        out.write(settingToString(setting) + "\n");
+                    }
+                }
+            });
         } catch (Exception ex) {
             Helper.HELPER.logDirect("Exception thrown while saving Baritone settings!");
             ex.printStackTrace();
@@ -116,9 +122,9 @@ public class SettingsUtil {
         return Minecraft.getInstance().gameDirectory.toPath().resolve("baritone").resolve(name);
     }
 
-    public static List<Settings.Setting> modifiedSettings(Settings settings) {
-        List<Settings.Setting> modified = new ArrayList<>();
-        for (Settings.Setting setting : settings.allSettings) {
+    public static List<Settings.Setting<?>> modifiedSettings(Settings settings) {
+        List<Settings.Setting<?>> modified = new ArrayList<>();
+        for (Settings.Setting<?> setting : settings.allSettings) {
             if (setting.value == null) {
                 System.out.println("NULL SETTING?" + setting.getName());
                 continue;
@@ -143,7 +149,7 @@ public class SettingsUtil {
      * @param setting The setting
      * @return The type
      */
-    public static String settingTypeToString(Settings.Setting setting) {
+    public static String settingTypeToString(Settings.Setting<?> setting) {
         return setting.getType().getTypeName()
                 .replaceAll("(?:\\w+\\.)+(\\w+)", "$1");
     }
@@ -158,14 +164,16 @@ public class SettingsUtil {
         return io.toString(setting.getType(), value);
     }
 
-    public static String settingValueToString(Settings.Setting setting) throws IllegalArgumentException {
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public static String settingValueToString(Settings.Setting<?> setting) throws IllegalArgumentException {
         //noinspection unchecked
-        return settingValueToString(setting, setting.value);
+        return settingValueToString((Settings.Setting) setting, setting.value);
     }
 
-    public static String settingDefaultToString(Settings.Setting setting) throws IllegalArgumentException {
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public static String settingDefaultToString(Settings.Setting<?> setting) throws IllegalArgumentException {
         //noinspection unchecked
-        return settingValueToString(setting, setting.defaultValue);
+        return settingValueToString((Settings.Setting) setting, setting.defaultValue);
     }
 
     public static String maybeCensor(int coord) {
@@ -176,7 +184,7 @@ public class SettingsUtil {
         return Integer.toString(coord);
     }
 
-    public static String settingToString(Settings.Setting setting) throws IllegalStateException {
+    public static String settingToString(Settings.Setting<?> setting) throws IllegalStateException {
         if (setting.isJavaOnly()) {
             return setting.getName();
         }
@@ -191,16 +199,17 @@ public class SettingsUtil {
      * @return true if the setting can not be set or read by the user
      */
     @Deprecated
-    public static boolean javaOnlySetting(Settings.Setting setting) {
+    public static boolean javaOnlySetting(Settings.Setting<?> setting) {
         return setting.isJavaOnly();
     }
 
+    @SuppressWarnings({"rawtypes", "unchecked"})
     public static void parseAndApply(Settings settings, String settingName, String settingValue) throws IllegalStateException, NumberFormatException {
         Settings.Setting setting = settings.byLowerName.get(settingName);
         if (setting == null) {
             throw new IllegalStateException("No setting by that name");
         }
-        Class intendedType = setting.getValueClass();
+        Class<?> intendedType = setting.getValueClass();
         ISettingParser ioMethod = Parser.getParser(setting.getType());
         Object parsed = ioMethod.parse(setting.getType(), settingValue);
         if (!intendedType.isInstance(parsed)) {
@@ -218,7 +227,7 @@ public class SettingsUtil {
         boolean accepts(Type type);
     }
 
-    private enum Parser implements ISettingParser {
+    private enum Parser implements ISettingParser<Object> {
 
         DOUBLE(Double.class, Double::parseDouble),
         BOOLEAN(Boolean.class, Boolean::parseBoolean),
@@ -318,6 +327,7 @@ public class SettingsUtil {
             this(cla$$, parser, Object::toString);
         }
 
+        @SuppressWarnings("unchecked")
         <T> Parser(Class<T> cla$$, Function<String, T> parser, Function<T, String> toString) {
             this.cla$$ = cla$$;
             this.parser = parser::apply;
@@ -338,7 +348,7 @@ public class SettingsUtil {
 
         @Override
         public boolean accepts(Type type) {
-            return type instanceof Class && this.cla$$.isAssignableFrom((Class) type);
+            return type instanceof Class && this.cla$$.isAssignableFrom((Class<?>) type);
         }
 
         public static Parser getParser(Type type) {

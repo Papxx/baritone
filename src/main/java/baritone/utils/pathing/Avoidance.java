@@ -19,13 +19,21 @@ package baritone.utils.pathing;
 
 import baritone.Baritone;
 import baritone.api.utils.BetterBlockPos;
+import baritone.api.utils.BlockUtils;
 import baritone.api.utils.IPlayerContext;
 import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.NeutralMob;
 import net.minecraft.world.entity.monster.EnderMan;
+import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.entity.monster.cubemob.SulfurCube;
 import net.minecraft.world.entity.monster.spider.Spider;
 import net.minecraft.world.entity.monster.zombie.ZombifiedPiglin;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Blocks;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -68,18 +76,64 @@ public class Avoidance {
         double mobSpawnerCoeff = Baritone.settings().mobSpawnerAvoidanceCoefficient.value;
         double mobCoeff = Baritone.settings().mobAvoidanceCoefficient.value;
         if (mobSpawnerCoeff != 1.0D) {
-            ctx.worldData().getCachedWorld().getLocationsOf("mob_spawner", 1, ctx.playerFeet().x, ctx.playerFeet().z, 2)
+            // the cache stores names from BlockUtils.blockToString ("spawner" since 1.13, not "mob_spawner")
+            ctx.worldData().getCachedWorld().getLocationsOf(BlockUtils.blockToString(Blocks.SPAWNER), 1, ctx.playerFeet().x, ctx.playerFeet().z, 2)
                     .forEach(mobspawner -> res.add(new Avoidance(mobspawner, mobSpawnerCoeff, Baritone.settings().mobSpawnerAvoidanceRadius.value)));
         }
         if (mobCoeff != 1.0D) {
+            @SuppressWarnings("deprecation")
+            boolean dark = ctx.player().getLightLevelDependentMagicValue() < 0.5;
             ctx.entitiesStream()
-                    .filter(entity -> entity instanceof Mob)
-                    .filter(entity -> (!(entity instanceof Spider)) || ctx.player().getLightLevelDependentMagicValue() < 0.5)
-                    .filter(entity -> !(entity instanceof ZombifiedPiglin) || ((ZombifiedPiglin) entity).getLastHurtByMob() != null)
-                    .filter(entity -> !(entity instanceof EnderMan) || ((EnderMan) entity).isCreepy())
+                    .filter(entity -> isDangerous(entity, dark))
                     .forEach(entity -> res.add(new Avoidance(entity.blockPosition(), mobCoeff, Baritone.settings().mobAvoidanceRadius.value)));
         }
         return res;
+    }
+
+    /**
+     * Hostile mobs, neutral mobs only while they attack, and sulfur cubes that burn (magma) or are about to explode.
+     * Passive mobs like cows and sheep don't count.
+     *
+     * @param dark whether the player is in the dark (spiders are only hostile in the dark)
+     */
+    public static boolean isDangerous(Entity entity, boolean dark) {
+        if (!(entity instanceof Mob)) {
+            return false;
+        }
+        Mob mob = (Mob) entity;
+        if (entity instanceof SulfurCube) {
+            return isDangerousSulfurCube((SulfurCube) entity);
+        }
+        if (entity instanceof NeutralMob) {
+            // the anger timer of some mobs (zombified piglins) isn't sent to the client, but attacking is
+            if (entity instanceof EnderMan && ((EnderMan) entity).isCreepy()) {
+                return true;
+            }
+            if (entity instanceof ZombifiedPiglin && mob.getLastHurtByMob() != null) {
+                return true;
+            }
+            return ((NeutralMob) entity).isAngry() || mob.isAggressive();
+        }
+        if (!(entity instanceof Enemy)) {
+            return false;
+        }
+        return !(entity instanceof Spider) || dark || mob.isAggressive();
+    }
+
+    private static boolean isDangerousSulfurCube(SulfurCube cube) {
+        if (cube.isPrimed()) {
+            return true;
+        }
+        ItemStack body = cube.getItemBySlot(EquipmentSlot.BODY);
+        if (body.isEmpty()) {
+            return false;
+        }
+        try {
+            // the archetypes are a synchronized registry, "hot" (magma) hurts on contact, "explosive" (tnt) explodes
+            return cube.matchingArchetypes(body).stream().anyMatch(a -> a.contactDamage().isPresent() || a.explosion().isPresent());
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     public void applySpherical(Long2DoubleOpenHashMap map) {

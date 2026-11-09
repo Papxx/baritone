@@ -33,12 +33,15 @@ import baritone.api.utils.input.Input;
 import baritone.pathing.movement.CalculationContext;
 import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.MovementHelper;
+import baritone.process.builder.BuilderPropertyRules;
+import baritone.process.builder.MaterialList;
 import baritone.utils.BaritoneProcessHelper;
 import baritone.utils.BlockStateInterface;
 import baritone.utils.PathingCommandContext;
 import baritone.utils.schematic.MapArtSchematic;
 import baritone.utils.schematic.SchematicSystem;
 import baritone.utils.schematic.SelectionSchematic;
+import baritone.utils.schematic.format.UnknownBlocks;
 import baritone.utils.schematic.litematica.LitematicaHelper;
 import baritone.utils.schematic.schematica.SchematicaHelper;
 import com.google.common.collect.ImmutableSet;
@@ -177,11 +180,19 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             return false;
         }
         IStaticSchematic parsed;
-        try {
-            parsed = format.get().parse(new FileInputStream(schematic));
+        try (FileInputStream in = new FileInputStream(schematic)) {
+            parsed = format.get().parse(in);
         } catch (Exception e) {
             e.printStackTrace();
             return false;
+        }
+        if (parsed instanceof UnknownBlocks.Source && !((UnknownBlocks.Source) parsed).getUnknownBlocks().isEmpty()) {
+            logDirect(((UnknownBlocks.Source) parsed).getUnknownBlocks().summary(5));
+            if (Baritone.settings().buildFailOnUnknownBlocks.value) {
+                logDirect("Not building it because buildFailOnUnknownBlocks is enabled");
+                return false;
+            }
+            logDirect("Positions with unknown blocks are left untouched");
         }
         ISchematic schem = applyMapArtAndSelection(origin, parsed);
         build(name, schem, origin);
@@ -218,19 +229,34 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
     @Override
     public void buildOpenLitematic(int i) {
-        if (LitematicaHelper.isLitematicaPresent()) {
-            //if java.lang.NoSuchMethodError is thrown see comment in SchematicPlacementManager
-            if (LitematicaHelper.hasLoadedSchematic(i)) {
-                Pair<IStaticSchematic, Vec3i> schematic = LitematicaHelper.getSchematic(i);
-                Vec3i correctedOrigin = schematic.second();
-                ISchematic schematic2 = applyMapArtAndSelection(correctedOrigin, schematic.first());
-                build(schematic.first().toString(), schematic2, correctedOrigin);
-            } else {
-                logDirect(String.format("List of placements has no entry %s", i + 1));
-            }
-        } else {
+        if (!LitematicaHelper.isLitematicaPresent()) {
             logDirect("Litematica is not present");
+            return;
         }
+        Pair<IStaticSchematic, Vec3i> schematic;
+        try {
+            if (!LitematicaHelper.hasLoadedSchematic(i)) {
+                logDirect(String.format("List of placements has no entry %s", i + 1));
+                return;
+            }
+            schematic = LitematicaHelper.getSchematic(i);
+        } catch (LinkageError e) {
+            // Baritone is compiled against stubs, a changed Litematica API ends up here instead of crashing
+            logDirect("The installed Litematica version is not compatible with this Baritone build: " + e);
+            e.printStackTrace();
+            return;
+        } catch (RuntimeException e) {
+            logDirect("Could not read Litematica placement " + (i + 1) + ": " + e);
+            e.printStackTrace();
+            return;
+        }
+        if (schematic == null) {
+            logDirect(String.format("Placement %s has no enabled sub-region", i + 1));
+            return;
+        }
+        Vec3i correctedOrigin = schematic.second();
+        ISchematic schematic2 = applyMapArtAndSelection(correctedOrigin, schematic.first());
+        build(schematic.first().toString(), schematic2, correctedOrigin);
     }
 
     public void clearArea(BlockPos corner1, BlockPos corner2) {
@@ -244,6 +270,45 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     @Override
     public List<BlockState> getApproxPlaceable() {
         return new ArrayList<>(approxPlaceable);
+    }
+
+    /**
+     * Adds every block of the current build that still has to be placed (all layers). Positions in unloaded chunks
+     * count as done only if they were seen done before. Main thread only.
+     *
+     * @return {@code false} if nothing is being built
+     */
+    public boolean collectMissing(MaterialList list) {
+        ISchematic sch = realSchematic != null ? realSchematic : schematic;
+        if (sch == null || origin == null) {
+            return false;
+        }
+        List<BlockState> placeable = approxPlaceable != null ? approxPlaceable : Collections.emptyList();
+        BlockStateInterface bsi = new BlockStateInterface(ctx);
+        for (int y = 0; y < sch.heightY(); y++) {
+            for (int z = 0; z < sch.lengthZ(); z++) {
+                for (int x = 0; x < sch.widthX(); x++) {
+                    int bx = x + origin.getX();
+                    int by = y + origin.getY();
+                    int bz = z + origin.getZ();
+                    BlockState current = bsi.get0(bx, by, bz);
+                    if (!sch.inSchematic(x, y, z, current)) {
+                        continue;
+                    }
+                    BlockState desired = sch.desiredState(x, y, z, current, placeable);
+                    if (desired == null || desired.isAir()) {
+                        continue;
+                    }
+                    boolean done = bsi.worldContainsLoadedChunk(bx, bz)
+                            ? validAt(current, desired, false, bx, by, bz)
+                            : observedCompleted != null && observedCompleted.contains(BetterBlockPos.longHash(bx, by, bz));
+                    if (!done) {
+                        list.add(desired);
+                    }
+                }
+            }
+        }
+        return true;
     }
 
     @Override
@@ -282,7 +347,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                         continue; // irrelevant
                     }
                     BlockState curr = bcc.bsi.get0(x, y, z);
-                    if (!(curr.getBlock() instanceof AirBlock) && !(curr.getBlock() == Blocks.WATER || curr.getBlock() == Blocks.LAVA) && !valid(curr, desired, false)) {
+                    if (!(curr.getBlock() instanceof AirBlock) && !(curr.getBlock() == Blocks.WATER || curr.getBlock() == Blocks.LAVA) && !validAt(curr, desired, false, x, y, z)) {
                         BetterBlockPos pos = new BetterBlockPos(x, y, z);
                         Optional<Rotation> rot = RotationUtils.reachable(ctx, pos, ctx.playerController().getBlockReachDistance());
                         if (rot.isPresent()) {
@@ -323,7 +388,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                         continue; // irrelevant
                     }
                     BlockState curr = bcc.bsi.get0(x, y, z);
-                    if (MovementHelper.isReplaceable(x, y, z, curr, bcc.bsi) && !valid(curr, desired, false)) {
+                    if (MovementHelper.isReplaceable(x, y, z, curr, bcc.bsi) && !validAt(curr, desired, false, x, y, z)) {
                         if (dy == 1 && bcc.bsi.get0(x, y + 1, z).getBlock() instanceof AirBlock) {
                             continue;
                         }
@@ -407,7 +472,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
             if (!meme.canPlace()) {
                 continue;
             }
-            if (valid(wouldBePlaced, desired, true)) {
+            BlockPos target = meme.getClickedPos();
+            if (validAt(wouldBePlaced, desired, true, target.getX(), target.getY(), target.getZ())) {
                 return OptionalInt.of(i);
             }
         }
@@ -643,7 +709,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                     if (desired != null) {
                         // we care about this position
                         BetterBlockPos pos = new BetterBlockPos(x, y, z);
-                        if (valid(bcc.bsi.get0(x, y, z), desired, false)) {
+                        if (validAt(bcc.bsi.get0(x, y, z), desired, false, x, y, z)) {
                             incorrectPositions.remove(pos);
                             observedCompleted.add(BetterBlockPos.longHash(pos));
                         } else {
@@ -670,7 +736,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
                     }
                     if (bcc.bsi.worldContainsLoadedChunk(blockX, blockZ)) { // check if its in render distance, not if its in cache
                         // we can directly observe this block, it is in render distance
-                        if (valid(bcc.bsi.get0(blockX, blockY, blockZ), schematic.desiredState(x, y, z, current, this.approxPlaceable), false)) {
+                        if (validAt(bcc.bsi.get0(blockX, blockY, blockZ), schematic.desiredState(x, y, z, current, this.approxPlaceable), false, blockX, blockY, blockZ)) {
                             observedCompleted.add(BetterBlockPos.longHash(blockX, blockY, blockZ));
                         } else {
                             incorrectPositions.add(new BetterBlockPos(blockX, blockY, blockZ));
@@ -1028,22 +1094,26 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
     }
 
     private static boolean sameBlockstate(BlockState first, BlockState second) {
-        if (first.getBlock() != second.getBlock()) {
+        return BuilderPropertyRules.sameState(first, second,
+                Baritone.settings().buildIgnoreDirection.value, ORIENTATION_PROPS,
+                Baritone.settings().buildIgnoreProperties.value,
+                Baritone.settings().buildIgnoreDynamicProperties.value,
+                Baritone.settings().buildIgnoreDerivedProperties.value);
+    }
+
+    /**
+     * Like {@link #valid}, but also accepts {@code current} if it is what the desired block turns into next to the
+     * current neighbours ({@code Block.updateFromNeighbourShapes}). Reads the world, so main thread only.
+     */
+    private boolean validAt(BlockState current, BlockState desired, boolean itemVerify, int x, int y, int z) {
+        if (valid(current, desired, itemVerify)) {
+            return true;
+        }
+        if (!Baritone.settings().buildIgnoreDerivedProperties.value || current.getBlock() != desired.getBlock()) {
             return false;
         }
-        boolean ignoreDirection = Baritone.settings().buildIgnoreDirection.value;
-        List<String> ignoredProps = Baritone.settings().buildIgnoreProperties.value;
-        if (!ignoreDirection && ignoredProps.isEmpty()) {
-            return first.equals(second); // early return if no properties are being ignored
-        }
-        for (Property<?> prop : first.getProperties()) {
-            if (first.getValue(prop) != second.getValue(prop)
-                    && !(ignoreDirection && ORIENTATION_PROPS.contains(prop))
-                    && !ignoredProps.contains(prop.getName())) {
-                return false;
-            }
-        }
-        return true;
+        BlockState updated = Block.updateFromNeighbourShapes(desired, ctx.world(), new BlockPos(x, y, z));
+        return BuilderPropertyRules.usableNeighbourUpdate(current, desired, updated) && valid(current, updated, itemVerify);
     }
 
     private static boolean containsBlockState(Collection<BlockState> states, BlockState state) {

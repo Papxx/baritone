@@ -19,6 +19,7 @@ package baritone.cache;
 
 import baritone.Baritone;
 import baritone.api.cache.ICachedRegion;
+import baritone.api.utils.AtomicFileWriter;
 import baritone.api.utils.BlockUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
@@ -130,62 +131,60 @@ public final class CachedRegion implements ICachedRegion {
             }
             System.out.println("Saving region " + x + "," + z + " to disk " + path);
             Path regionFile = getRegionFile(path, this.x, this.z);
-            if (!Files.exists(regionFile)) {
-                Files.createFile(regionFile);
-            }
-            try (
-                    FileOutputStream fileOut = new FileOutputStream(regionFile.toFile());
-                    GZIPOutputStream gzipOut = new GZIPOutputStream(fileOut, 16384);
-                    DataOutputStream out = new DataOutputStream(gzipOut)
-            ) {
-                out.writeInt(CACHED_REGION_MAGIC);
-                for (int x = 0; x < 32; x++) {
-                    for (int z = 0; z < 32; z++) {
-                        CachedChunk chunk = this.chunks[x][z];
-                        if (chunk == null) {
-                            out.write(CHUNK_NOT_PRESENT);
-                        } else {
-                            out.write(CHUNK_PRESENT);
-                            byte[] chunkBytes = chunk.toByteArray();
-                            out.write(chunkBytes);
-                            // Messy, but fills the empty 0s that should be trailing to fill up the space.
-                            out.write(new byte[chunk.sizeInBytes - chunkBytes.length]);
-                        }
-                    }
-                }
-                for (int x = 0; x < 32; x++) {
-                    for (int z = 0; z < 32; z++) {
-                        if (chunks[x][z] != null) {
-                            for (int i = 0; i < 256; i++) {
-                                out.writeUTF(BlockUtils.blockToString(chunks[x][z].getOverview()[i].getBlock()));
+            AtomicFileWriter.write(regionFile, fileOut -> {
+                try (
+                        GZIPOutputStream gzipOut = new GZIPOutputStream(fileOut, 16384);
+                        DataOutputStream out = new DataOutputStream(gzipOut)
+                ) {
+                    out.writeInt(CACHED_REGION_MAGIC);
+                    for (int x = 0; x < 32; x++) {
+                        for (int z = 0; z < 32; z++) {
+                            CachedChunk chunk = this.chunks[x][z];
+                            if (chunk == null) {
+                                out.write(CHUNK_NOT_PRESENT);
+                            } else {
+                                out.write(CHUNK_PRESENT);
+                                byte[] chunkBytes = chunk.toByteArray();
+                                out.write(chunkBytes);
+                                // Messy, but fills the empty 0s that should be trailing to fill up the space.
+                                out.write(new byte[chunk.sizeInBytes - chunkBytes.length]);
                             }
                         }
                     }
-                }
-                for (int x = 0; x < 32; x++) {
-                    for (int z = 0; z < 32; z++) {
-                        if (chunks[x][z] != null) {
-                            Map<String, List<BlockPos>> locs = chunks[x][z].getRelativeBlocks();
-                            out.writeShort(locs.entrySet().size());
-                            for (Map.Entry<String, List<BlockPos>> entry : locs.entrySet()) {
-                                out.writeUTF(entry.getKey());
-                                out.writeShort(entry.getValue().size());
-                                for (BlockPos pos : entry.getValue()) {
-                                    out.writeByte((byte) (pos.getZ() << 4 | pos.getX()));
-                                    out.writeInt(pos.getY()-dimension.minY());
+                    for (int x = 0; x < 32; x++) {
+                        for (int z = 0; z < 32; z++) {
+                            if (chunks[x][z] != null) {
+                                for (int i = 0; i < 256; i++) {
+                                    out.writeUTF(BlockUtils.blockToString(chunks[x][z].getOverview()[i].getBlock()));
                                 }
                             }
                         }
                     }
-                }
-                for (int x = 0; x < 32; x++) {
-                    for (int z = 0; z < 32; z++) {
-                        if (chunks[x][z] != null) {
-                            out.writeLong(chunks[x][z].cacheTimestamp);
+                    for (int x = 0; x < 32; x++) {
+                        for (int z = 0; z < 32; z++) {
+                            if (chunks[x][z] != null) {
+                                Map<String, List<BlockPos>> locs = chunks[x][z].getRelativeBlocks();
+                                out.writeShort(locs.entrySet().size());
+                                for (Map.Entry<String, List<BlockPos>> entry : locs.entrySet()) {
+                                    out.writeUTF(entry.getKey());
+                                    out.writeShort(entry.getValue().size());
+                                    for (BlockPos pos : entry.getValue()) {
+                                        out.writeByte((byte) (pos.getZ() << 4 | pos.getX()));
+                                        out.writeInt(pos.getY()-dimension.minY());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    for (int x = 0; x < 32; x++) {
+                        for (int z = 0; z < 32; z++) {
+                            if (chunks[x][z] != null) {
+                                out.writeLong(chunks[x][z].cacheTimestamp);
+                            }
                         }
                     }
                 }
-            }
+            });
             hasUnsavedChanges = false;
             System.out.println("Saved region successfully");
         } catch (Exception ex) {
@@ -222,7 +221,8 @@ public final class CachedRegion implements ICachedRegion {
                 }
                 boolean[][] present = new boolean[32][32];
                 BitSet[][] bitSets = new BitSet[32][32];
-                Map<String, List<BlockPos>>[][] location = new Map[32][32];
+                @SuppressWarnings("unchecked")
+                Map<String, List<BlockPos>>[][] location = (Map<String, List<BlockPos>>[][]) new Map<?, ?>[32][32];
                 BlockState[][][] overview = new BlockState[32][32][];
                 long[][] cacheTimestamp = new long[32][32];
                 for (int x = 0; x < 32; x++) {

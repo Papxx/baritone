@@ -220,8 +220,8 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
                 desiredPitch = nudgeToLevel(desiredPitch);
             }
 
-            desiredYaw += this.randomYawOffset;
-            desiredPitch += this.randomPitchOffset;
+            desiredYaw += (float) this.randomYawOffset;
+            desiredPitch += (float) this.randomPitchOffset;
 
             return new Rotation(
                     this.calculateMouseMove(prev.getYaw(), desiredYaw),

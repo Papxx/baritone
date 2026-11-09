@@ -42,6 +42,14 @@ public class StaticSchematic extends AbstractSchematic implements IStaticSchemat
         this.y = empty ? 0 : states[0][0].length;
     }
 
+    /**
+     * A {@code null} entry (e.g. a block this Minecraft version doesn't know) is not part of the schematic.
+     */
+    @Override
+    public boolean inSchematic(int x, int y, int z, BlockState currentState) {
+        return super.inSchematic(x, y, z, currentState) && this.states[x][z][y] != null;
+    }
+
     @Override
     public BlockState desiredState(int x, int y, int z, BlockState current, List<BlockState> approxPlaceable) {
         return this.states[x][z][y];

@@ -39,7 +39,12 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * @author Brady
@@ -74,6 +79,17 @@ public final class CachedWorld implements ICachedWorld, Helper {
      */
     private final Map<ChunkPos, LevelChunk> toPackMap = CacheBuilder.newBuilder().softValues().<ChunkPos, LevelChunk>build().asMap();
 
+    /**
+     * Queued by {@link #close()}, the packer thread stops once it gets here. Compared by identity.
+     */
+    private static final ChunkPos STOP_PACKING = new ChunkPos(0, 0);
+
+    private volatile boolean closed;
+
+    private final CountDownLatch closeRequested = new CountDownLatch(1);
+
+    private final CompletableFuture<Void> packerStopped = new CompletableFuture<>();
+
     private final DimensionType dimension;
 
     private final ResourceKey<Level> dimensionId;
@@ -92,22 +108,44 @@ public final class CachedWorld implements ICachedWorld, Helper {
         Baritone.getExecutor().execute(new PackerThread());
         Baritone.getExecutor().execute(() -> {
             try {
-                Thread.sleep(30000);
-                while (true) {
+                if (closeRequested.await(30, TimeUnit.SECONDS)) {
+                    return;
+                }
+                do {
                     // since a region only saves if it's been modified since its last save
                     // saving every 10 minutes means that once it's time to exit
                     // we'll only have a couple regions to save
                     save();
-                    Thread.sleep(600000);
-                }
+                } while (!closeRequested.await(10, TimeUnit.MINUTES));
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
         });
     }
 
+    /**
+     * Packs the chunks that are still queued, saves everything to disk and stops the background threads of this
+     * world. Blocks until that's done. The cached data stays readable afterwards, but no new chunks get packed.
+     */
+    void close() {
+        closed = true;
+        toPackQueue.add(STOP_PACKING);
+        closeRequested.countDown();
+        try {
+            packerStopped.get(30, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException | TimeoutException e) {
+            System.out.println("Chunk packer didn't finish in time, saving anyway");
+        }
+        save();
+    }
+
     @Override
     public final void queueForPacking(LevelChunk chunk) {
+        if (closed) {
+            return;
+        }
         if (toPackMap.put(chunk.getPos(), chunk) == null) {
             toPackQueue.add(chunk.getPos());
         }
@@ -307,9 +345,20 @@ public final class CachedWorld implements ICachedWorld, Helper {
     private class PackerThread implements Runnable {
 
         public void run() {
+            try {
+                packQueuedChunks();
+            } finally {
+                packerStopped.complete(null);
+            }
+        }
+
+        private void packQueuedChunks() {
             while (true) {
                 try {
                     ChunkPos pos = toPackQueue.take();
+                    if (pos == STOP_PACKING) {
+                        return;
+                    }
                     LevelChunk chunk = toPackMap.remove(pos);
                     if (toPackQueue.size() > Baritone.settings().chunkPackerQueueMaxSize.value) {
                         continue;

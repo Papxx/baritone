@@ -27,6 +27,7 @@ import baritone.api.command.registry.Registry;
 public enum ArgParserManager implements IArgParserManager {
     INSTANCE;
 
+    @SuppressWarnings("rawtypes")
     public final Registry<IArgParser> registry = new Registry<>();
 
     ArgParserManager() {
@@ -34,25 +35,26 @@ public enum ArgParserManager implements IArgParserManager {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public <T> IArgParser.Stateless<T> getParserStateless(Class<T> type) {
         //noinspection unchecked
-        return this.registry.descendingStream()
+        return (IArgParser.Stateless<T>) this.registry.descendingStream()
                 .filter(IArgParser.Stateless.class::isInstance)
-                .map(IArgParser.Stateless.class::cast)
+                .map(p -> (IArgParser.Stateless<?>) p)
                 .filter(parser -> parser.getTarget().isAssignableFrom(type))
                 .findFirst()
                 .orElse(null);
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public <T, S> IArgParser.Stated<T, S> getParserStated(Class<T> type, Class<S> stateKlass) {
         //noinspection unchecked
-        return this.registry.descendingStream()
+        return (IArgParser.Stated<T, S>) this.registry.descendingStream()
                 .filter(IArgParser.Stated.class::isInstance)
-                .map(IArgParser.Stated.class::cast)
+                .map(p -> (IArgParser.Stated<?, ?>) p)
                 .filter(parser -> parser.getTarget().isAssignableFrom(type))
                 .filter(parser -> parser.getStateType().isAssignableFrom(stateKlass))
-                .map(IArgParser.Stated.class::cast)
                 .findFirst()
                 .orElse(null);
     }
@@ -84,6 +86,7 @@ public enum ArgParserManager implements IArgParserManager {
     }
 
     @Override
+    @SuppressWarnings("rawtypes")
     public Registry<IArgParser> getRegistry() {
         return this.registry;
     }

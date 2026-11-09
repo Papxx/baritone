@@ -57,8 +57,8 @@ public class PlayerMovementInput extends ClientInput {
 
         boolean sneaking = handler.isInputForcedDown(Input.SNEAK);
         if (sneaking) {
-            leftImpulse *= 0.3D;
-            forwardImpulse *= 0.3D;
+            leftImpulse *= 0.3F;
+            forwardImpulse *= 0.3F;
         }
         this.moveVector = new Vec2(leftImpulse, forwardImpulse);
 

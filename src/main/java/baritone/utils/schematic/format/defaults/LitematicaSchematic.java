@@ -20,9 +20,8 @@ package baritone.utils.schematic.format.defaults;
 import baritone.api.schematic.CompositeSchematic;
 import baritone.api.schematic.IStaticSchematic;
 import baritone.utils.schematic.StaticSchematic;
-import net.minecraft.core.Holder;
+import baritone.utils.schematic.format.UnknownBlocks;
 import net.minecraft.core.Vec3i;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.resources.Identifier;
@@ -43,7 +42,9 @@ import java.util.Optional;
  * @author rycbar
  * @since 22.09.2022
  */
-public final class LitematicaSchematic extends CompositeSchematic implements IStaticSchematic {
+public final class LitematicaSchematic extends CompositeSchematic implements IStaticSchematic, UnknownBlocks.Source {
+
+    private final UnknownBlocks unknownBlocks = new UnknownBlocks();
 
     /**
      * @param nbtTagCompound a decompressed file stream aka nbt data.
@@ -81,22 +82,27 @@ public final class LitematicaSchematic extends CompositeSchematic implements ISt
 
     /**
      * @param blockStatePalette List of all different block types used in the schematic.
-     * @return Array of BlockStates.
+     * @param unknownNames      receives the name of every palette entry with an unknown block, {@code null} otherwise
+     * @return Array of BlockStates, {@code null} for blocks this Minecraft version doesn't know and structure void
      */
-    private static BlockState[] getBlockList(ListTag blockStatePalette) {
+    private BlockState[] getBlockList(ListTag blockStatePalette, String[] unknownNames) {
         BlockState[] blockList = new BlockState[blockStatePalette.size()];
 
         for (int i = 0; i < blockStatePalette.size(); i++) {
             CompoundTag tag = (CompoundTag) blockStatePalette.get(i);
-            Identifier blockKey = Identifier.tryParse(tag.getString("Name").orElse(""));
-            Block block = blockKey == null
-                ? Blocks.AIR
-                : BuiltInRegistries.BLOCK.get(blockKey)
-                    .map(Holder.Reference::value)
-                    .orElse(Blocks.AIR);
+            String name = tag.getString("Name").orElse("");
+            Block block = UnknownBlocks.lookup(Identifier.tryParse(name));
+            if (block == null) {
+                // unknown blocks are left out instead of becoming air
+                unknownNames[i] = name.isEmpty() ? "<no name>" : name;
+                continue;
+            }
+            if (block == Blocks.STRUCTURE_VOID) {
+                continue; // structure void means "don't care", like in Litematica
+            }
             CompoundTag properties = tag.getCompound("Properties").orElse(new CompoundTag());
 
-            blockList[i] = getBlockState(block, properties);
+            blockList[i] = getBlockState(name, block, properties);
         }
         return blockList;
     }
@@ -106,29 +112,34 @@ public final class LitematicaSchematic extends CompositeSchematic implements ISt
      * @param properties List of Properties the block has.
      * @return A blockState.
      */
-    private static BlockState getBlockState(Block block, CompoundTag properties) {
+    private BlockState getBlockState(String name, Block block, CompoundTag properties) {
         BlockState blockState = block.defaultBlockState();
 
         for (String key : properties.keySet()) {
             Property<?> property = block.getStateDefinition().getProperty(key);
             String propertyValue = properties.getString(key).orElse(null);
             if (property != null) {
-                blockState = setPropertyValue(blockState, property, propertyValue);
+                BlockState updated = setPropertyValue(blockState, property, propertyValue);
+                if (updated == null) {
+                    unknownBlocks.addProperty(name + "[" + key + "=" + propertyValue + "]");
+                } else {
+                    blockState = updated;
+                }
             }
         }
         return blockState;
     }
 
     /**
+     * @return the updated state, or {@code null} if the value is unknown to this Minecraft version
      * @author Emerson
      */
     private static <T extends Comparable<T>> BlockState setPropertyValue(BlockState state, Property<T> property, String value) {
-        Optional<T> parsed = property.getValue(value);
-        if (parsed.isPresent()) {
-            return state.setValue(property, parsed.get());
-        } else {
-            throw new IllegalArgumentException("Invalid value for property " + property);
+        if (value == null) {
+            return null;
         }
+        Optional<T> parsed = property.getValue(value);
+        return parsed.map(v -> state.setValue(property, v)).orElse(null);
     }
 
     /**
@@ -169,14 +180,15 @@ public final class LitematicaSchematic extends CompositeSchematic implements ISt
         Vec3i offsetMinCorner = new Vec3i(getMinOfSchematic(nbt, "x"), getMinOfSchematic(nbt, "y"), getMinOfSchematic(nbt, "z"));
         for (CompoundTag subReg : getRegions(nbt)) {
             ListTag usedBlockTypes = subReg.getListOrEmpty("BlockStatePalette");
-            BlockState[] blockList = getBlockList(usedBlockTypes);
+            String[] unknownNames = new String[usedBlockTypes.size()];
+            BlockState[] blockList = getBlockList(usedBlockTypes, unknownNames);
 
             int bitsPerBlock = getBitsPerBlock(usedBlockTypes.size());
             long regionVolume = getVolume(subReg);
             long[] blockStateArray = subReg.getLongArray("BlockStates").orElse(new long[0]);
 
             LitematicaBitArray bitArray = new LitematicaBitArray(bitsPerBlock, regionVolume, blockStateArray);
-            writeSubregionIntoSchematic(subReg, offsetMinCorner, blockList, bitArray);
+            writeSubregionIntoSchematic(subReg, offsetMinCorner, blockList, unknownNames, bitArray);
         }
     }
 
@@ -186,7 +198,7 @@ public final class LitematicaSchematic extends CompositeSchematic implements ISt
      * @param blockList list with the different block types used in the schematic.
      * @param bitArray  bit array that holds the placement pattern.
      */
-    private void writeSubregionIntoSchematic(CompoundTag subReg, Vec3i offsetMinCorner, BlockState[] blockList, LitematicaBitArray bitArray) {
+    private void writeSubregionIntoSchematic(CompoundTag subReg, Vec3i offsetMinCorner, BlockState[] blockList, String[] unknownNames, LitematicaBitArray bitArray) {
         int offsetX = getMinOfSubregion(subReg, "x") - offsetMinCorner.getX();
         int offsetY = getMinOfSubregion(subReg, "y") - offsetMinCorner.getY();
         int offsetZ = getMinOfSubregion(subReg, "z") - offsetMinCorner.getZ();
@@ -199,7 +211,12 @@ public final class LitematicaSchematic extends CompositeSchematic implements ISt
         for (int y = 0; y < sizeY; y++) {
             for (int z = 0; z < sizeZ; z++) {
                 for (int x = 0; x < sizeX; x++) {
-                    states[x][z][y] = blockList[bitArray.getAt(index)];
+                    int paletteIndex = bitArray.getAt(index);
+                    BlockState state = blockList[paletteIndex];
+                    if (unknownNames[paletteIndex] != null) {
+                        unknownBlocks.addBlock(unknownNames[paletteIndex], 1);
+                    }
+                    states[x][z][y] = state;
                     index++;
                 }
             }
@@ -209,7 +226,16 @@ public final class LitematicaSchematic extends CompositeSchematic implements ISt
 
     @Override
     public BlockState getDirect(int x, int y, int z) {
+        // positions between the sub-regions aren't part of any of them
+        if (!inSchematic(x, y, z, null)) {
+            return null;
+        }
         return desiredState(x, y, z, null, Collections.emptyList());
+    }
+
+    @Override
+    public UnknownBlocks getUnknownBlocks() {
+        return unknownBlocks;
     }
 
     /**
@@ -281,6 +307,7 @@ public final class LitematicaSchematic extends CompositeSchematic implements ISt
             }
         }
 
+        @SuppressWarnings("unused")
         public long size() {
             return this.arraySize;
         }

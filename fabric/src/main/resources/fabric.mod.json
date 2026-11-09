@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "baritone-meteor",
+  "id": "baritone",
   "version": "${version}",
 
   "name": "Baritone",
@@ -21,7 +21,7 @@
   "entrypoints": {
   },
   "mixins": [
-      "mixins.baritone-meteor.json"
+      "mixins.baritone.json"
   ],
   "depends": {
     "fabricloader": ">=0.19.3",

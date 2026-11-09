@@ -53,7 +53,7 @@ public class MixinCommandSuggestionHelper {
     private List<String> commandUsage;
 
     @Shadow
-    private ParseResults currentParse;
+    private ParseResults<?> currentParse;
 
     @Shadow
     private CompletableFuture<Suggestions> pendingSuggestions;

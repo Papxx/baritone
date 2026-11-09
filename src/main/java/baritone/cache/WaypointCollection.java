@@ -20,6 +20,7 @@ package baritone.cache;
 import baritone.api.cache.IWaypoint;
 import baritone.api.cache.IWaypointCollection;
 import baritone.api.cache.Waypoint;
+import baritone.api.utils.AtomicFileWriter;
 import baritone.api.utils.BetterBlockPos;
 
 import java.io.*;
@@ -88,25 +89,41 @@ public class WaypointCollection implements IWaypointCollection {
                 int z = in.readInt();
                 this.waypoints.get(tag).add(new Waypoint(name, tag, new BetterBlockPos(x, y, z), creationTimestamp));
             }
-        } catch (IOException ignored) {}
+        } catch (IOException ex) {
+            // Keep whatever could be read, but move the broken file aside first, so that the next save can't overwrite
+            // the waypoints that couldn't be read
+            Path backup = fileName.resolveSibling(fileName.getFileName() + ".corrupt-" + System.currentTimeMillis());
+            System.out.println("Failed to load " + tag + " waypoints from " + fileName + ", " + this.waypoints.get(tag).size() + " of them could be read. Moving the file to " + backup);
+            ex.printStackTrace();
+            try {
+                Files.move(fileName, backup);
+            } catch (IOException moveEx) {
+                moveEx.printStackTrace();
+                return; // don't overwrite the original file if we couldn't back it up
+            }
+            save(tag);
+        }
     }
 
     private synchronized void save(Waypoint.Tag tag) {
         Path fileName = this.directory.resolve(tag.name().toLowerCase() + ".mp4");
-        try (
-                FileOutputStream fileOut = new FileOutputStream(fileName.toFile());
-                BufferedOutputStream bufOut = new BufferedOutputStream(fileOut);
-                DataOutputStream out = new DataOutputStream(bufOut)
-        ) {
-            out.writeLong(WAYPOINT_MAGIC_VALUE);
-            out.writeLong(this.waypoints.get(tag).size());
-            for (IWaypoint waypoint : this.waypoints.get(tag)) {
-                out.writeUTF(waypoint.getName());
-                out.writeLong(waypoint.getCreationTimestamp());
-                out.writeInt(waypoint.getLocation().getX());
-                out.writeInt(waypoint.getLocation().getY());
-                out.writeInt(waypoint.getLocation().getZ());
-            }
+        try {
+            AtomicFileWriter.write(fileName, fileOut -> {
+                try (
+                        BufferedOutputStream bufOut = new BufferedOutputStream(fileOut);
+                        DataOutputStream out = new DataOutputStream(bufOut)
+                ) {
+                    out.writeLong(WAYPOINT_MAGIC_VALUE);
+                    out.writeLong(this.waypoints.get(tag).size());
+                    for (IWaypoint waypoint : this.waypoints.get(tag)) {
+                        out.writeUTF(waypoint.getName());
+                        out.writeLong(waypoint.getCreationTimestamp());
+                        out.writeInt(waypoint.getLocation().getX());
+                        out.writeInt(waypoint.getLocation().getY());
+                        out.writeInt(waypoint.getLocation().getZ());
+                    }
+                }
+            });
         } catch (IOException ex) {
             ex.printStackTrace();
         }

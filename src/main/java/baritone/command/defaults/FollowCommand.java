@@ -50,7 +50,7 @@ public class FollowCommand extends Command {
         FollowGroup group;
         FollowList list;
         List<Entity> entities = new ArrayList<>();
-        List<EntityType> classes = new ArrayList<>();
+        List<EntityType<?>> classes = new ArrayList<>();
         if (args.hasExactlyOne()) {
             baritone.getFollowProcess().follow((group = args.getEnum(FollowGroup.class)).filter);
         } else {
@@ -61,7 +61,7 @@ public class FollowCommand extends Command {
                 Object gotten = args.getDatatypeFor(list.datatype);
                 if (gotten instanceof EntityType) {
                     //noinspection unchecked
-                    classes.add((EntityType) gotten);
+                    classes.add((EntityType<?>) gotten);
                 } else if (gotten != null) {
                     entities.add((Entity) gotten);
                 }
@@ -102,7 +102,7 @@ public class FollowCommand extends Command {
                     .filterPrefix(args.getString())
                     .stream();
         } else {
-            IDatatypeFor followType;
+            IDatatypeFor<?> followType;
             try {
                 followType = args.getEnum(FollowList.class).datatype;
             } catch (NullPointerException e) {
@@ -154,9 +154,9 @@ public class FollowCommand extends Command {
         ENTITY(EntityClassById.INSTANCE),
         PLAYER(NearbyPlayer.INSTANCE);
 
-        final IDatatypeFor datatype;
+        final IDatatypeFor<?> datatype;
 
-        FollowList(IDatatypeFor datatype) {
+        FollowList(IDatatypeFor<?> datatype) {
             this.datatype = datatype;
         }
     }

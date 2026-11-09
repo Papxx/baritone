@@ -17,11 +17,20 @@
 
 package fi.dy.masa.litematica.schematic;
 
+import fi.dy.masa.litematica.schematic.container.LitematicaBlockStateContainer;
 import net.minecraft.core.BlockPos;
 
 public class LitematicaSchematic {
 
+    /**
+     * @return the signed size of the sub-region, negative components extend from the sub-region origin
+     * in negative direction
+     */
     public BlockPos getAreaSize(String name) {
+        throw new LinkageError();
+    }
+
+    public LitematicaBlockStateContainer getSubRegionContainer(String name) {
         throw new LinkageError();
     }
 }

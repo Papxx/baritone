@@ -31,14 +31,18 @@ import xyz.wagyourtail.unimined.api.minecraft.MinecraftConfig;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
+import java.util.zip.ZipOutputStream;
 
 /**
  * @author Brady
@@ -52,8 +56,6 @@ public class ProguardTask extends BaritoneGradleTask {
     public String getProguardVersion() {
         return proguardVersion;
     }
-
-    private List<String> requiredLibraries;
 
     @TaskAction
     protected void exec() throws Exception {
@@ -130,9 +132,9 @@ public class ProguardTask extends BaritoneGradleTask {
         template.add(0, "-injars '" + this.artifactPath.toString() + "'");
         template.add(1, "-outjars '" + this.getTemporaryFile(PROGUARD_EXPORT_PATH) + "'");
 
-        template.add(2, "-libraryjars  <java.home>/jmods/java.base.jmod(!**.jar;!module-info.class)");
-        template.add(3, "-libraryjars  <java.home>/jmods/java.desktop.jmod(!**.jar;!module-info.class)");
-        template.add(4, "-libraryjars  <java.home>/jmods/jdk.unsupported.jmod(!**.jar;!module-info.class)");
+        template.add(2, "-libraryjars  " + jdkModuleLibrary("java.base"));
+        template.add(3, "-libraryjars  " + jdkModuleLibrary("java.desktop"));
+        template.add(4, "-libraryjars  " + jdkModuleLibrary("jdk.unsupported"));
 
         {
             final Stream<File> libraries;
@@ -172,6 +174,39 @@ public class ProguardTask extends BaritoneGradleTask {
         Files.write(getTemporaryFile(compType + PROGUARD_STANDALONE_CONFIG), standalone);
     }
 
+    /**
+     * JDK builds without the jmods directory (allowed since JEP 493, e.g. Eclipse Temurin 24+) can't be passed to
+     * proguard as jmod files, so the module's classes are copied out of the JDK's runtime image into a jar instead.
+     */
+    private String jdkModuleLibrary(String module) throws IOException {
+        JavaLauncher launcher = getJavaLauncherForProguard();
+        Path javaHome = launcher.getMetadata().getInstallationPath().getAsFile().toPath();
+        if (Files.exists(javaHome.resolve("jmods").resolve(module + ".jmod"))) {
+            return "<java.home>/jmods/" + module + ".jmod(!**.jar;!module-info.class)";
+        }
+        Path jar = getTemporaryFile("jdk-" + launcher.getMetadata().getJavaRuntimeVersion() + "-" + module + ".jar");
+        if (!Files.exists(jar)) {
+            Path tmp = Files.createTempFile(jar.getParent(), jar.getFileName().toString(), ".tmp");
+            try (
+                    FileSystem jrt = FileSystems.newFileSystem(URI.create("jrt:/"), Map.of("java.home", javaHome.toString()));
+                    ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(tmp));
+                    Stream<Path> files = Files.walk(jrt.getPath("/modules", module))
+            ) {
+                Path root = jrt.getPath("/modules", module);
+                for (Path file : (Iterable<Path>) files.filter(p -> p.toString().endsWith(".class")).sorted()::iterator) {
+                    out.putNextEntry(new ZipEntry(root.relativize(file).toString()));
+                    Files.copy(file, out);
+                    out.closeEntry();
+                }
+            } catch (IOException | RuntimeException e) {
+                Files.deleteIfExists(tmp);
+                throw e;
+            }
+            Files.move(tmp, jar, StandardCopyOption.REPLACE_EXISTING);
+        }
+        return "'" + jar + "'(!module-info.class)";
+    }
+
     private Stream<File> acquireDependencies() {
         return getProject().getExtensions().getByType(JavaPluginExtension.class).getSourceSets().findByName("main").getCompileClasspath().getFiles()
                 .stream()
@@ -188,25 +223,6 @@ public class ProguardTask extends BaritoneGradleTask {
         Determinizer.determinize(this.proguardOut.toString(), this.artifactStandalonePath.toString(), List.of(), false);
     }
 
-    private static final class Pair<A, B> {
-        public final A a;
-        public final B b;
-
-        private Pair(final A a, final B b) {
-            this.a = a;
-            this.b = b;
-        }
-
-        @Override
-        public String toString() {
-            return "Pair{" +
-                    "a=" + this.a +
-                    ", " +
-                    "b=" + this.b +
-                    '}';
-        }
-    }
-
     private void cleanup() {
         try {
             Files.delete(this.proguardOut);
@@ -217,6 +233,7 @@ public class ProguardTask extends BaritoneGradleTask {
         this.proguardVersion = url;
     }
 
+    @SuppressWarnings("deprecation")
     private void runProguard(Path config) throws Exception {
         // Delete the existing proguard output file. Proguard probably handles this already, but why not do it ourselves
         if (Files.exists(this.proguardOut)) {

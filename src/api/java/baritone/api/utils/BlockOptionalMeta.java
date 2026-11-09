@@ -33,7 +33,6 @@ import net.minecraft.server.RegistryLayer;
 import net.minecraft.server.ReloadableServerRegistries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.packs.PackType;
-import net.minecraft.server.packs.VanillaPackResources;
 import net.minecraft.server.packs.repository.ServerPacksSource;
 import net.minecraft.server.packs.resources.CloseableResourceManager;
 import net.minecraft.server.packs.resources.MultiPackResourceManager;
@@ -59,9 +58,7 @@ import net.minecraft.world.phys.Vec3;
 import sun.misc.Unsafe;
 
 import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -107,6 +104,7 @@ public final class BlockOptionalMeta {
         stackHashes = getStackHashes(blockstates);
     }
 
+    @SuppressWarnings("unchecked")
     private static <C extends Comparable<C>, P extends Property<C>> P castToIProperty(Object value) {
         //noinspection unchecked
         return (P) value;
@@ -202,23 +200,6 @@ public final class BlockOptionalMeta {
 
     public Set<Integer> stackHashes() {
         return stackHashes;
-    }
-
-    private static Method getVanillaServerPack;
-
-    private static VanillaPackResources getVanillaServerPack() {
-        if (getVanillaServerPack == null) {
-            getVanillaServerPack = Arrays.stream(ServerPacksSource.class.getDeclaredMethods()).filter(field -> field.getReturnType() == VanillaPackResources.class).findFirst().orElseThrow();
-            getVanillaServerPack.setAccessible(true);
-        }
-
-        try {
-            return (VanillaPackResources) getVanillaServerPack.invoke(null);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-        return null;
     }
 
     private static synchronized List<Item> drops(Block b) {

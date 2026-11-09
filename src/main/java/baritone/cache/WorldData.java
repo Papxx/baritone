@@ -17,7 +17,6 @@
 
 package baritone.cache;
 
-import baritone.Baritone;
 import baritone.api.cache.ICachedWorld;
 import baritone.api.cache.IWaypointCollection;
 import baritone.api.cache.IWorldData;
@@ -40,18 +39,16 @@ public class WorldData implements IWorldData {
     public final Path directory;
     public final DimensionType dimension;
 
+    /**
+     * How many {@link WorldProvider}s currently have this world loaded. Guarded by {@link WorldProvider}'s world cache.
+     */
+    int users;
+
     WorldData(Path directory, DimensionType dimension, ResourceKey<Level> dimensionId) {
         this.directory = directory;
         this.cache = new CachedWorld(directory.resolve("cache"), dimension, dimensionId);
         this.waypoints = new WaypointCollection(directory.resolve("waypoints"));
         this.dimension = dimension;
-    }
-
-    public void onClose() {
-        Baritone.getExecutor().execute(() -> {
-            System.out.println("Started saving the world in a new thread");
-            cache.save();
-        });
     }
 
     @Override

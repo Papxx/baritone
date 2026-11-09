@@ -80,12 +80,12 @@ components.java {
 }
 
 task proguard(type: ProguardTask) {
-    proguardVersion "7.9.1"
-    compType "fabric"
+    proguardVersion = "7.9.1"
+    compType = "fabric"
 }
 
 task createDist(type: CreateDistTask, dependsOn: proguard) {
-    compType "fabric"
+    compType = "fabric"
 }
 
 task sourcesJar(type: Jar, dependsOn: classes) {
@@ -99,8 +99,8 @@ build.finalizedBy(createDist)
 publishing {
     publications {
         maven(MavenPublication) {
-            groupId "meteordevelopment"
-            artifactId "baritone"
+            groupId = "meteordevelopment"
+            artifactId = "baritone"
             artifact "../dist/baritone-api-fabric-" + version + ".jar"
             artifact sourcesJar
         }

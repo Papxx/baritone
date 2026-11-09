@@ -65,5 +65,6 @@ public interface IArgParserManager {
      */
     <T, S> T parseStated(Class<T> type, Class<S> stateKlass, ICommandArgument arg, S state) throws CommandInvalidTypeException;
 
+    @SuppressWarnings("rawtypes")
     Registry<IArgParser> getRegistry();
 }

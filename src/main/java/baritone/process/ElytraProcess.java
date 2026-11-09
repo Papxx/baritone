@@ -67,7 +67,7 @@ import java.util.concurrent.TimeUnit;
 
 import static baritone.api.pathing.movement.ActionCosts.COST_INF;
 
-public class ElytraProcess extends BaritoneProcessHelper implements IBaritoneProcess, IElytraProcess, AbstractGameEventListener {
+public class ElytraProcess extends BaritoneProcessHelper implements IElytraProcess, AbstractGameEventListener {
     public State state;
     private boolean goingToLandingSpot;
     private BetterBlockPos landingSpot;

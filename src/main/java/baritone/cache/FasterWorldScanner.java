@@ -174,6 +174,7 @@ public enum FasterWorldScanner implements IWorldScanner {
         return blocks;
     }
 
+    @SuppressWarnings("unchecked")
     private void visitSection(BlockOptionalMetaLookup lookup, LevelChunkSection section, List<BlockPos> blocks, long chunkX, int sectionY, long chunkZ) {
         if (section == null || section.hasOnlyAir()) {
             return;

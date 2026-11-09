@@ -27,6 +27,7 @@ import net.minecraft.client.multiplayer.chat.GuiMessageTag;
 import net.minecraft.core.Vec3i;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.Mirror;
@@ -329,6 +330,55 @@ public final class Settings {
      * A list of names of block properties the builder will ignore.
      */
     public final Setting<List<String>> buildIgnoreProperties = new Setting<>(new ArrayList<>(Arrays.asList(
+    )));
+
+    /**
+     * Ignore block properties that change on their own or that placing a block can't produce, so the builder doesn't
+     * break and replace such blocks forever: growth ({@code age}, {@code stage}, {@code hatch}, {@code berries},
+     * {@code honey_level}), leaf {@code distance} and {@code persistent}, scaffolding {@code distance}, farmland
+     * {@code moisture}, {@code snowy} and signal strengths ({@code power}).
+     */
+    public final Setting<Boolean> buildIgnoreDynamicProperties = new Setting<>(true);
+
+    /**
+     * Accept blocks whose neighbour dependent properties differ from the schematic, e.g. because the neighbours aren't
+     * built yet: connections of fences, panes, walls and redstone, stair shapes, mushroom faces, note block instruments.
+     * Close to the player the builder also checks what the desired block would look like next to the current neighbours.
+     */
+    public final Setting<Boolean> buildIgnoreDerivedProperties = new Setting<>(true);
+
+    /**
+     * Refuse to build schematic files with blocks this Minecraft version doesn't know (e.g. from a newer version).
+     * <p>
+     * If false, such blocks are listed in chat when loading and their positions are left untouched.
+     */
+    public final Setting<Boolean> buildFailOnUnknownBlocks = new Setting<>(false);
+
+    /**
+     * Eat automatically when hungry (see autoEatHungerThreshold) or hurt (see autoEatHealthThreshold). Pathing pauses
+     * at a safe moment for eating and continues afterwards. Never eats food with harmful effects (chorus fruit,
+     * pufferfish, spider eyes, rotten flesh, raw chicken, suspicious stew) or anything on autoEatBlacklist.
+     * <p>
+     * Uses the hotbar and offhand, and the main inventory if allowInventory is on. Command: eat
+     */
+    public final Setting<Boolean> autoEat = new Setting<>(false);
+
+    /**
+     * Eat when the food level (0-20) is below this
+     */
+    public final Setting<Integer> autoEatHungerThreshold = new Setting<>(14);
+
+    /**
+     * Also eat when health (0-20) is below this and the food bar isn't full, so health regenerates faster
+     */
+    public final Setting<Float> autoEatHealthThreshold = new Setting<>(10f);
+
+    /**
+     * Food that is never eaten automatically
+     */
+    public final Setting<List<Item>> autoEatBlacklist = new Setting<>(new ArrayList<>(Arrays.asList(
+            Items.GOLDEN_APPLE,
+            Items.ENCHANTED_GOLDEN_APPLE
     )));
 
     /**
@@ -682,7 +732,7 @@ public final class Settings {
      * Allow chat based control of Baritone. Most likely should be disabled when Baritone is imported for use in
      * something else
      */
-    public final Setting<Boolean> chatControl = new Setting<>(false);
+    public final Setting<Boolean> chatControl = new Setting<>(true);
 
     /**
      * Some clients like Impact try to force chatControl to off, so here's a second setting to do it anyway
@@ -1601,7 +1651,6 @@ public final class Settings {
         private String name;
         private boolean javaOnly;
 
-        @SuppressWarnings("unchecked")
         private Setting(T value) {
             if (value == null) {
                 throw new IllegalArgumentException("Cannot determine value type class from null");
@@ -1625,6 +1674,7 @@ public final class Settings {
             return name;
         }
 
+        @SuppressWarnings("unchecked")
         public Class<T> getValueClass() {
             // noinspection unchecked
             return (Class<T>) TypeUtils.resolveBaseClass(getType());

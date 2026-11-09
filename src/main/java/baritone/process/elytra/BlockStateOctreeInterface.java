@@ -19,14 +19,12 @@ package baritone.process.elytra;
 
 import dev.babbaj.pathfinder.NetherPathfinder;
 import dev.babbaj.pathfinder.Octree;
-import net.minecraft.world.level.dimension.DimensionType;
 
 /**
  * @author Brady
  */
 public final class BlockStateOctreeInterface {
 
-    private final NetherPathfinderContext context;
     private final long contextPtr;
     private final int minY;
     transient long chunkPtr;
@@ -36,7 +34,6 @@ public final class BlockStateOctreeInterface {
     private int prevChunkZ = Integer.MAX_VALUE;
 
     public BlockStateOctreeInterface(final NetherPathfinderContext context) {
-        this.context = context;
         this.contextPtr = context.context;
         this.minY = context.minY;
     }

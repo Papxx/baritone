@@ -51,7 +51,6 @@ import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.chunk.ChunkSource;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
@@ -171,9 +170,6 @@ public final class ElytraBehavior implements Helper {
             } else {
                 this.ticksNearUnchanged = 0;
             }
-
-            int minY = ctx.world().dimensionType().minY();
-            int y = ctx.playerFeet().y;
 
             npfContext.acquireReadLock();
             try {
@@ -845,6 +841,11 @@ public final class ElytraBehavior implements Helper {
                     && this.ignoreLava == other.ignoreLava
                     && Objects.equals(this.boost, other.boost);
         }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(System.identityHashCode(this.path), this.playerNear, this.start, this.motion, this.boundingBox, this.ignoreLava, this.boost);
+        }
     }
 
     private static final class FireworkBoost {
@@ -901,6 +902,14 @@ public final class ElytraBehavior implements Helper {
             return Objects.equals(this.fireworkTicksExisted, other.fireworkTicksExisted)
                     && this.minimumBoostTicks == other.minimumBoostTicks
                     && this.maximumBoostTicks == other.maximumBoostTicks;
+        }
+
+        @Override
+        public int hashCode() {
+            if (!this.isBoosted()) {
+                return 0;
+            }
+            return Objects.hash(this.fireworkTicksExisted, this.minimumBoostTicks, this.maximumBoostTicks);
         }
     }
 
@@ -1191,8 +1200,6 @@ public final class ElytraBehavior implements Helper {
         int remainingTicksBoosted = ticksBoosted;
 
         for (int i = 0; i < ticks; i++) {
-            final double cx = hitbox.minX + (hitbox.maxX - hitbox.minX) * 0.5D;
-            final double cz = hitbox.minZ + (hitbox.maxZ - hitbox.minZ) * 0.5D;
             if (delta.lengthSqr() < 1) {
                 break;
             }

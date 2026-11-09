@@ -18,10 +18,9 @@
 package baritone.utils.schematic.format.defaults;
 
 import baritone.utils.schematic.StaticSchematic;
+import baritone.utils.schematic.format.UnknownBlocks;
 import baritone.utils.type.VarInt;
 import it.unimi.dsi.fastutil.ints.Int2ObjectArrayMap;
-import net.minecraft.core.Holder;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.block.Block;
@@ -39,7 +38,9 @@ import java.util.regex.Pattern;
  * @author Brady
  * @since 12/27/2019
  */
-public final class SpongeSchematic extends StaticSchematic {
+public final class SpongeSchematic extends StaticSchematic implements UnknownBlocks.Source {
+
+    private final UnknownBlocks unknownBlocks = new UnknownBlocks();
 
     public SpongeSchematic(CompoundTag nbt) {
         this.x = nbt.getInt("Width").orElse(0);
@@ -48,6 +49,7 @@ public final class SpongeSchematic extends StaticSchematic {
         this.states = new BlockState[this.x][this.z][this.y];
 
         Int2ObjectArrayMap<BlockState> palette = new Int2ObjectArrayMap<>();
+        Int2ObjectArrayMap<String> unknownPalette = new Int2ObjectArrayMap<>();
         CompoundTag paletteTag = nbt.getCompound("Palette").orElse(new CompoundTag());
         for (String tag : paletteTag.keySet()) {
             int index = paletteTag.getInt(tag).orElse(0);
@@ -57,9 +59,11 @@ public final class SpongeSchematic extends StaticSchematic {
                 throw new IllegalArgumentException("Unable to parse palette tag");
             }
 
-            BlockState state = serializedState.deserialize();
+            BlockState state = serializedState.deserialize(unknownBlocks);
             if (state == null) {
-                throw new IllegalArgumentException("Unable to deserialize palette tag");
+                // block unknown to this Minecraft version, these positions are left out
+                unknownPalette.put(index, serializedState.identifier.toString());
+                continue;
             }
 
             palette.put(index, state);
@@ -85,13 +89,24 @@ public final class SpongeSchematic extends StaticSchematic {
                     int index = (y * this.z + z) * this.x + x;
                     BlockState state = palette.get(blockData[index]);
                     if (state == null) {
-                        throw new IllegalArgumentException("Invalid Palette Index " + index);
+                        String unknown = unknownPalette.get(blockData[index]);
+                        if (unknown == null) {
+                            throw new IllegalArgumentException("Invalid Palette Index " + blockData[index]);
+                        }
+                        unknownBlocks.addBlock(unknown, 1);
+                    } else if (state.is(Blocks.STRUCTURE_VOID)) {
+                        state = null; // structure void means "don't care"
                     }
 
                     this.states[x][z][y] = state;
                 }
             }
         }
+    }
+
+    @Override
+    public UnknownBlocks getUnknownBlocks() {
+        return unknownBlocks;
     }
 
     private static final class SerializedBlockState {
@@ -107,17 +122,26 @@ public final class SpongeSchematic extends StaticSchematic {
             this.properties = properties;
         }
 
-        private BlockState deserialize() {
+        /**
+         * @return the state, or {@code null} if the block is unknown to this Minecraft version
+         */
+        private BlockState deserialize(UnknownBlocks unknownBlocks) {
             if (this.blockState == null) {
-                Block block = BuiltInRegistries.BLOCK.get(this.identifier)
-                    .map(Holder.Reference::value)
-                    .orElse(Blocks.AIR);
+                Block block = UnknownBlocks.lookup(this.identifier);
+                if (block == null) {
+                    return null;
+                }
                 this.blockState = block.defaultBlockState();
 
                 this.properties.keySet().stream().sorted(String::compareTo).forEachOrdered(key -> {
                     Property<?> property = block.getStateDefinition().getProperty(key);
                     if (property != null) {
-                        this.blockState = setPropertyValue(this.blockState, property, this.properties.get(key));
+                        BlockState updated = setPropertyValue(this.blockState, property, this.properties.get(key));
+                        if (updated == null) {
+                            unknownBlocks.addProperty(this.identifier + "[" + key + "=" + this.properties.get(key) + "]");
+                        } else {
+                            this.blockState = updated;
+                        }
                     }
                 });
             }
@@ -152,11 +176,8 @@ public final class SpongeSchematic extends StaticSchematic {
 
         private static <T extends Comparable<T>> BlockState setPropertyValue(BlockState state, Property<T> property, String value) {
             Optional<T> parsed = property.getValue(value);
-            if (parsed.isPresent()) {
-                return state.setValue(property, parsed.get());
-            } else {
-                throw new IllegalArgumentException("Invalid value for property " + property);
-            }
+            // null = value unknown to this Minecraft version
+            return parsed.map(v -> state.setValue(property, v)).orElse(null);
         }
     }
 }

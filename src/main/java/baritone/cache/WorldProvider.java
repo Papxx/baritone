@@ -34,6 +34,11 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 /**
  * @author Brady
@@ -42,6 +47,12 @@ import java.util.Optional;
 public class WorldProvider implements IWorldProvider {
 
     private static final Map<Path, WorldData> worldCache = new HashMap<>();
+
+    /**
+     * Worlds that nobody uses anymore and that are being written to disk before they get dropped from RAM.
+     * Guarded by {@link #worldCache}.
+     */
+    private static final Map<Path, CompletableFuture<Void>> closingWorlds = new HashMap<>();
 
     private final Baritone baritone;
     private final IPlayerContext ctx;
@@ -91,9 +102,7 @@ public class WorldProvider implements IWorldProvider {
             } catch (IOException ignored) {}
 
             System.out.println("Baritone world data dir: " + worldDataDir);
-            synchronized (worldCache) {
-                this.currentWorld = worldCache.computeIfAbsent(worldDataDir, d -> new WorldData(d, world.dimensionType(), world.dimension()));
-            }
+            this.currentWorld = acquireWorld(worldDataDir, () -> new WorldData(worldDataDir, world.dimensionType(), world.dimension()));
             this.mcWorld = ctx.world();
         });
     }
@@ -105,7 +114,59 @@ public class WorldProvider implements IWorldProvider {
         if (world == null) {
             return;
         }
-        world.onClose();
+        synchronized (worldCache) {
+            world.users--;
+        }
+        Baritone.getExecutor().execute(() -> {
+            System.out.println("Started saving the world in a new thread");
+            CompletableFuture<Void> closing = new CompletableFuture<>();
+            boolean unload;
+            synchronized (worldCache) {
+                // Keep the world in RAM if it was joined again in the meantime, or if its cache only exists in RAM
+                unload = world.users <= 0 && Baritone.settings().chunkCaching.value && worldCache.get(world.directory) == world;
+                if (unload) {
+                    worldCache.remove(world.directory);
+                    closingWorlds.put(world.directory, closing);
+                }
+            }
+            if (!unload) {
+                world.cache.save();
+                return;
+            }
+            try {
+                world.cache.close(); // the next visit loads everything back from disk
+            } finally {
+                synchronized (worldCache) {
+                    closingWorlds.remove(world.directory, closing);
+                }
+                closing.complete(null);
+            }
+        });
+    }
+
+    /**
+     * Returns the world in this directory, creating it if it isn't in RAM. If it's still being written to disk after
+     * the last visit, waits for that first, so that we don't load outdated data.
+     */
+    private static WorldData acquireWorld(Path worldDataDir, Supplier<WorldData> constructor) {
+        for (boolean waited = false; ; waited = true) {
+            CompletableFuture<Void> closing;
+            synchronized (worldCache) {
+                closing = closingWorlds.get(worldDataDir);
+                if (closing == null || waited) {
+                    WorldData data = worldCache.computeIfAbsent(worldDataDir, d -> constructor.get());
+                    data.users++;
+                    return data;
+                }
+            }
+            try {
+                closing.get(10, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (ExecutionException | TimeoutException e) {
+                System.out.println("Previous visit of " + worldDataDir + " is still being saved, loading anyway");
+            }
+        }
     }
 
     private Path getWorldDataDirectory(Path parent, Level world) {

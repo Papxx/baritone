@@ -65,12 +65,12 @@ public class GuiClick extends Screen implements Helper {
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor grapics, int mouseX, int mouseY, float partialTicks) {
-        double mx = mc.mouseHandler.xpos();
-        double my = mc.mouseHandler.ypos();
+        double mx = this.minecraft.mouseHandler.xpos();
+        double my = this.minecraft.mouseHandler.ypos();
 
-        my = mc.getWindow().getScreenHeight() - my;
-        my *= mc.getWindow().getHeight() / (double) mc.getWindow().getScreenHeight();
-        mx *= mc.getWindow().getWidth() / (double) mc.getWindow().getScreenWidth();
+        my = this.minecraft.getWindow().getScreenHeight() - my;
+        my *= this.minecraft.getWindow().getHeight() / (double) this.minecraft.getWindow().getScreenHeight();
+        mx *= this.minecraft.getWindow().getWidth() / (double) this.minecraft.getWindow().getScreenWidth();
         Vec3 near = toWorld(mx, my, 1);
         Vec3 far = toWorld(mx, my, 0); // "Use 0.945 that's what stack overflow says" - leijurv
 
@@ -127,7 +127,7 @@ public class GuiClick extends Screen implements Helper {
         this.projectionViewMatrix.invert();
 
         if (currentMouseOver != null) {
-            Entity e = mc.getCameraEntity();
+            Entity e = this.minecraft.getCameraEntity();
             // drawSingleSelectionBox WHEN?
             PathRenderer.drawManySelectionBoxes(modelViewStack, e, Collections.singletonList(currentMouseOver), Color.CYAN);
             if (clickStart != null && !clickStart.equals(currentMouseOver)) {
@@ -145,8 +145,8 @@ public class GuiClick extends Screen implements Helper {
             return null;
         }
 
-        x /= mc.getWindow().getWidth();
-        y /= mc.getWindow().getHeight();
+        x /= this.minecraft.getWindow().getWidth();
+        y /= this.minecraft.getWindow().getHeight();
         x = x * 2 - 1;
         y = y * 2 - 1;
 

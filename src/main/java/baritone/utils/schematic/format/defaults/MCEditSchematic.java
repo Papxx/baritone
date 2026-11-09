@@ -18,20 +18,20 @@
 package baritone.utils.schematic.format.defaults;
 
 import baritone.utils.schematic.StaticSchematic;
-import net.minecraft.core.Holder;
-import net.minecraft.core.registries.BuiltInRegistries;
+import baritone.utils.schematic.format.UnknownBlocks;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.datafix.fixes.ItemIdFix;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * @author Brady
  * @since 12/27/2019
  */
-public final class MCEditSchematic extends StaticSchematic {
+public final class MCEditSchematic extends StaticSchematic implements UnknownBlocks.Source {
+
+    private final UnknownBlocks unknownBlocks = new UnknownBlocks();
 
     public MCEditSchematic(CompoundTag schematic) {
         String type = schematic.getString("Materials").orElseThrow();
@@ -64,12 +64,13 @@ public final class MCEditSchematic extends StaticSchematic {
                         // additional is 0 through 15 inclusive since it's & 0xF above
                         blockID |= additional[blockInd] << 8;
                     }
-                    Identifier blockKey = Identifier.tryParse(ItemIdFix.getItem(blockID));
-                    Block block = blockKey == null
-                        ? Blocks.AIR
-                        : BuiltInRegistries.BLOCK.get(blockKey)
-                            .map(Holder.Reference::value)
-                            .orElse(Blocks.AIR);
+                    String name = ItemIdFix.getItem(blockID);
+                    Block block = UnknownBlocks.lookup(Identifier.tryParse(name));
+                    if (block == null) {
+                        // e.g. legacy names without a modern block of the same name, left out instead of air
+                        unknownBlocks.addBlock(name + " (id " + blockID + ")", 1);
+                        continue;
+                    }
 
 //                    int meta = metadata[blockInd] & 0xFF;
 //                    this.states[x][z][y] = block.getStateFromMeta(meta);
@@ -77,5 +78,10 @@ public final class MCEditSchematic extends StaticSchematic {
                 }
             }
         }
+    }
+
+    @Override
+    public UnknownBlocks getUnknownBlocks() {
+        return unknownBlocks;
     }
 }

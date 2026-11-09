@@ -112,6 +112,14 @@ public final class ChunkPacker {
         return new CachedChunk(chunk.getPos().x(), chunk.getPos().z(), height, bitSet, blocks, specialBlocks, System.currentTimeMillis());
     }
 
+    /**
+     * @param adjY y relative to the bottom of the world
+     * @see MovementHelper#inGeyserColumn
+     */
+    private static boolean inGeyserColumn(LevelChunk chunk, int x, int adjY, int z) {
+        return MovementHelper.inGeyserColumn(dy -> adjY - dy >= 0 ? getFromChunk(chunk, x, adjY - dy, z) : null);
+    }
+
     private static PathingBlockType getPathingBlockType(BlockState state, LevelChunk chunk, int x, int y, int z) {
         Block block = state.getBlock();
         if (MovementHelper.isWater(state)) {
@@ -121,6 +129,9 @@ public final class ChunkPacker {
                 return PathingBlockType.AVOID;
             }
             int adjY = y - chunk.getLevel().dimensionType().minY();
+            if (inGeyserColumn(chunk, x, adjY, z)) {
+                return PathingBlockType.AVOID;
+            }
             if (
                     (x != 15 && MovementHelper.possiblyFlowing(getFromChunk(chunk, x + 1, adjY, z)))
                             || (x != 0 && MovementHelper.possiblyFlowing(getFromChunk(chunk, x - 1, adjY, z)))

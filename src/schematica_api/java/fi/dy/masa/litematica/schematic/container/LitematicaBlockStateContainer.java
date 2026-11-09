@@ -15,13 +15,25 @@
  * along with Baritone.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package fi.dy.masa.litematica.world;
+package fi.dy.masa.litematica.schematic.container;
 
-import net.minecraft.world.level.Level;
+import net.minecraft.core.Vec3i;
+import net.minecraft.world.level.block.state.BlockState;
 
-public abstract class WorldSchematic extends Level {
-    private WorldSchematic() {
-        super(null, null, null, null, false, false, 0, 0);
+public class LitematicaBlockStateContainer {
+
+    /**
+     * Index order in Litematica is {@code y * sizeX * sizeZ + z * sizeX + x}, coordinates start at the
+     * minimum corner of the sub-region in its untransformed orientation. Never returns null.
+     */
+    public BlockState get(int x, int y, int z) {
+        throw new LinkageError();
+    }
+
+    /**
+     * @return the absolute size of the sub-region
+     */
+    public Vec3i getSize() {
         throw new LinkageError();
     }
 }

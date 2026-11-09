@@ -127,7 +127,9 @@ public class PathExecutor implements IPathExecutor, Helper {
         Pair<Double, BlockPos> status = closestPathPos(path);
         if (possiblyOffPath(status, MAX_DIST_FROM_PATH)) {
             ticksAway++;
-            System.out.println("FAR AWAY FROM PATH FOR " + ticksAway + " TICKS. Current distance: " + status.first() + ". Threshold: " + MAX_DIST_FROM_PATH);
+            if (ticksAway == 1) { // once per excursion instead of every tick
+                System.out.println("FAR AWAY FROM PATH. Current distance: " + status.first() + ". Threshold: " + MAX_DIST_FROM_PATH);
+            }
             if (ticksAway > MAX_TICKS_AWAY) {
                 logDebug("Too far away from path for too long, cancelling path");
                 cancel();

@@ -109,7 +109,7 @@ public interface IWaypoint {
          * @return The tag, if found, or null.
          */
         public static Tag getByName(String name) {
-            for (Tag action : Tag.values()) {
+            for (Tag action : TAG_LIST) {
                 for (String alias : action.names) {
                     if (alias.equalsIgnoreCase(name)) {
                         return action;
@@ -126,7 +126,7 @@ public interface IWaypoint {
         public static String[] getAllNames() {
             Set<String> names = new HashSet<>();
 
-            for (Tag tag : Tag.values()) {
+            for (Tag tag : TAG_LIST) {
                 names.addAll(Arrays.asList(tag.names));
             }
 

@@ -41,6 +41,7 @@ public class Paginator<E> implements Helper {
         this.entries = entries;
     }
 
+    @SafeVarargs
     public Paginator(E... entries) {
         this.entries = Arrays.asList(entries);
     }
